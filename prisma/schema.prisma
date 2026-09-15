@@ -1,0 +1,449 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model appointments {
+  id                                          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patient_id                                  String             @db.Uuid
+  assigned_staff_id                           String?            @db.Uuid
+  type                                        appointment_type   @default(first_visit)
+  status                                      appointment_status @default(pending)
+  scheduled_at                                DateTime           @db.Timestamptz(6)
+  visit_address                               String?
+  created_by                                  String?            @db.Uuid
+  note                                        String?
+  created_at                                  DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                                  DateTime           @default(now()) @db.Timestamptz(6)
+  users_appointments_assigned_staff_idTousers users?             @relation("appointments_assigned_staff_idTousers", fields: [assigned_staff_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_appointments_created_byTousers        users?             @relation("appointments_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patients                                    patients           @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  examinations                                examinations[]
+
+  @@index([patient_id], map: "idx_appointments_patient")
+  @@index([scheduled_at], map: "idx_appointments_scheduled")
+  @@index([assigned_staff_id], map: "idx_appointments_staff")
+}
+
+model body_parts {
+  id                           Int                            @id @default(autoincrement())
+  code                         String                         @unique @db.VarChar(50)
+  name                         String                         @db.VarChar(150)
+  region                       String?                        @db.VarChar(50)
+  view_side                    String?                        @db.VarChar(10)
+  parent_id                    Int?
+  coord_x                      Decimal?                       @db.Decimal(6, 2)
+  coord_y                      Decimal?                       @db.Decimal(6, 2)
+  model_node_id                String?                        @db.VarChar(100)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  body_parts                   body_parts?                    @relation("body_partsTobody_parts", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  other_body_parts             body_parts[]                   @relation("body_partsTobody_parts")
+  patient_symptom_report_items patient_symptom_report_items[]
+
+  @@index([parent_id], map: "idx_bodyparts_parent")
+  @@index([region], map: "idx_bodyparts_region")
+}
+
+model cskh_assignments {
+  id            BigInt    @id @default(autoincrement())
+  patient_id    String    @db.Uuid
+  cskh_staff_id String    @db.Uuid
+  assigned_at   DateTime  @default(now()) @db.Timestamptz(6)
+  unassigned_at DateTime? @db.Timestamptz(6)
+  is_active     Boolean   @default(true)
+  users         users     @relation(fields: [cskh_staff_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patients      patients  @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([patient_id], map: "idx_cskh_assign_patient")
+  @@index([cskh_staff_id], map: "idx_cskh_assign_staff")
+}
+
+model cskh_care_logs {
+  id               BigInt                @id @default(autoincrement())
+  patient_id       String                @db.Uuid
+  cskh_staff_id    String?               @db.Uuid
+  interaction_type care_interaction_type
+  content          String?
+  next_action      String?
+  next_action_date DateTime?             @db.Date
+  created_at       DateTime              @default(now()) @db.Timestamptz(6)
+  users            users?                @relation(fields: [cskh_staff_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patients         patients              @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([patient_id], map: "idx_care_logs_patient")
+  @@index([cskh_staff_id], map: "idx_care_logs_staff")
+}
+
+model disease_product_recommendations {
+  id                 BigInt   @id @default(autoincrement())
+  disease_id         Int
+  product_id         String   @db.Uuid
+  recommended_dosage String?  @db.VarChar(200)
+  priority           Int?     @default(1) @db.SmallInt
+  note               String?
+  diseases           diseases @relation(fields: [disease_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  products           products @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([disease_id, product_id])
+  @@index([disease_id], map: "idx_recommend_disease")
+}
+
+model disease_symptoms {
+  disease_id Int
+  symptom_id Int
+  diseases   diseases @relation(fields: [disease_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  symptoms   symptoms @relation(fields: [symptom_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([disease_id, symptom_id])
+}
+
+model diseases {
+  id                              Int                               @id @default(autoincrement())
+  name                            String                            @db.VarChar(200)
+  icd_code                        String?                           @db.VarChar(20)
+  description                     String?
+  created_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  disease_product_recommendations disease_product_recommendations[]
+  disease_symptoms                disease_symptoms[]
+  examinations                    examinations[]
+}
+
+model examination_symptoms {
+  id             BigInt          @id @default(autoincrement())
+  examination_id String          @db.Uuid
+  symptom_id     Int
+  severity       severity_level? @default(mild)
+  note           String?
+  examinations   examinations    @relation(fields: [examination_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  symptoms       symptoms        @relation(fields: [symptom_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([examination_id], map: "idx_exam_symptoms_exam")
+}
+
+model examinations {
+  id                      String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  appointment_id          String                   @db.Uuid
+  patient_id              String                   @db.Uuid
+  report_id               String?                  @db.Uuid
+  doctor_id               String?                  @db.Uuid
+  diagnosis_id            Int?
+  diagnosis_note          String?
+  examined_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  next_visit_date         DateTime?                @db.Date
+  created_at              DateTime                 @default(now()) @db.Timestamptz(6)
+  examination_symptoms    examination_symptoms[]
+  appointments            appointments             @relation(fields: [appointment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  diseases                diseases?                @relation(fields: [diagnosis_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                   users?                   @relation(fields: [doctor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patients                patients                 @relation(fields: [patient_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patient_symptom_reports patient_symptom_reports? @relation(fields: [report_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  follow_up_schedules     follow_up_schedules[]
+  prescriptions           prescriptions[]
+
+  @@index([appointment_id], map: "idx_examinations_appointment")
+  @@index([patient_id], map: "idx_examinations_patient")
+}
+
+model follow_up_schedules {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  examination_id  String?         @db.Uuid
+  patient_id      String          @db.Uuid
+  next_visit_date DateTime        @db.Date
+  status          followup_status @default(scheduled)
+  reminder_sent   Boolean         @default(false)
+  note            String?
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime        @default(now()) @db.Timestamptz(6)
+  examinations    examinations?   @relation(fields: [examination_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patients        patients        @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([next_visit_date], map: "idx_followup_date")
+  @@index([patient_id], map: "idx_followup_patient")
+  @@index([status], map: "idx_followup_status")
+}
+
+model notifications {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patient_id    String?             @db.Uuid
+  user_id       String?             @db.Uuid
+  type          notification_type
+  title         String              @db.VarChar(200)
+  content       String?
+  related_table String?             @db.VarChar(50)
+  related_id    String?             @db.Uuid
+  scheduled_at  DateTime?           @db.Timestamptz(6)
+  sent_at       DateTime?           @db.Timestamptz(6)
+  status        notification_status @default(pending)
+  is_read       Boolean             @default(false)
+  created_at    DateTime            @default(now()) @db.Timestamptz(6)
+  patients      patients?           @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users         users?              @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([patient_id], map: "idx_notifications_patient")
+  @@index([scheduled_at], map: "idx_notifications_scheduled")
+  @@index([status], map: "idx_notifications_status")
+}
+
+model patient_medical_history {
+  id             BigInt   @id @default(autoincrement())
+  patient_id     String   @db.Uuid
+  condition_name String   @db.VarChar(200)
+  note           String?
+  recorded_at    DateTime @default(now()) @db.Timestamptz(6)
+  patients       patients @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([patient_id], map: "idx_history_patient")
+}
+
+model patient_symptom_report_items {
+  id                      BigInt                  @id @default(autoincrement())
+  report_id               String                  @db.Uuid
+  body_part_id            Int
+  symptom_id              Int?
+  severity                severity_level?         @default(mild)
+  note                    String?
+  body_parts              body_parts              @relation(fields: [body_part_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patient_symptom_reports patient_symptom_reports @relation(fields: [report_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  symptoms                symptoms?               @relation(fields: [symptom_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([body_part_id], map: "idx_report_items_bodypart")
+  @@index([report_id], map: "idx_report_items_report")
+}
+
+model patient_symptom_reports {
+  id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patient_id                   String                         @db.Uuid
+  source                       String?                        @default("app") @db.VarChar(30)
+  status                       String?                        @default("submitted") @db.VarChar(30)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  examinations                 examinations[]
+  patient_symptom_report_items patient_symptom_report_items[]
+  patients                     patients                       @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([patient_id], map: "idx_symptom_reports_patient")
+}
+
+model patients {
+  id                                     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                String?                   @db.Uuid
+  full_name                              String                    @db.VarChar(150)
+  date_of_birth                          DateTime?                 @db.Date
+  gender                                 gender_type?
+  phone                                  String?                   @db.VarChar(20)
+  address                                String?
+  province                               String?                   @db.VarChar(100)
+  health_insurance_no                    String?                   @db.VarChar(50)
+  emergency_contact_name                 String?                   @db.VarChar(150)
+  emergency_contact_phone                String?                   @db.VarChar(20)
+  note                                   String?
+  assigned_cskh_id                       String?                   @db.Uuid
+  created_at                             DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                             DateTime                  @default(now()) @db.Timestamptz(6)
+  appointments                           appointments[]
+  cskh_assignments                       cskh_assignments[]
+  cskh_care_logs                         cskh_care_logs[]
+  examinations                           examinations[]
+  follow_up_schedules                    follow_up_schedules[]
+  notifications                          notifications[]
+  patient_medical_history                patient_medical_history[]
+  patient_symptom_reports                patient_symptom_reports[]
+  users_patients_assigned_cskh_idTousers users?                    @relation("patients_assigned_cskh_idTousers", fields: [assigned_cskh_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_patients_user_idTousers          users?                    @relation("patients_user_idTousers", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  prescriptions                          prescriptions[]
+
+  @@index([assigned_cskh_id], map: "idx_patients_cskh")
+  @@index([phone], map: "idx_patients_phone")
+}
+
+model prescription_items {
+  id                BigInt        @id @default(autoincrement())
+  prescription_id   String        @db.Uuid
+  product_id        String        @db.Uuid
+  quantity          Int           @default(1)
+  dosage            String?       @db.VarChar(200)
+  usage_instruction String?
+  duration_days     Int?
+  prescriptions     prescriptions @relation(fields: [prescription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  products          products      @relation(fields: [product_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([prescription_id], map: "idx_prescription_items_presc")
+}
+
+model prescriptions {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  examination_id     String               @db.Uuid
+  patient_id         String               @db.Uuid
+  prescribed_by      String?              @db.Uuid
+  note               String?
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  prescription_items prescription_items[]
+  examinations       examinations         @relation(fields: [examination_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patients           patients             @relation(fields: [patient_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users              users?               @relation(fields: [prescribed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([patient_id], map: "idx_prescriptions_patient")
+}
+
+model products {
+  id                              String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                            String                            @db.VarChar(200)
+  type                            product_type
+  manufacturer                    String?                           @db.VarChar(150)
+  unit                            String?                           @db.VarChar(50)
+  dosage_form                     String?                           @db.VarChar(100)
+  price                           Decimal?                          @default(0) @db.Decimal(12, 2)
+  stock_quantity                  Int?                              @default(0)
+  usage_instruction               String?
+  contraindication                String?
+  status                          product_status                    @default(active)
+  created_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  disease_product_recommendations disease_product_recommendations[]
+  prescription_items              prescription_items[]
+  symptom_product_recommendations symptom_product_recommendations[]
+
+  @@index([name], map: "idx_products_name")
+  @@index([type], map: "idx_products_type")
+}
+
+model roles {
+  id          Int      @id @default(autoincrement()) @db.SmallInt
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(100)
+  description String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  users       users[]
+}
+
+model symptom_product_recommendations {
+  id                 BigInt   @id @default(autoincrement())
+  symptom_id         Int
+  product_id         String   @db.Uuid
+  recommended_dosage String?  @db.VarChar(200)
+  priority           Int?     @default(1) @db.SmallInt
+  note               String?
+  products           products @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  symptoms           symptoms @relation(fields: [symptom_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([symptom_id, product_id])
+  @@index([symptom_id], map: "idx_recommend_symptom")
+}
+
+model symptoms {
+  id                              Int                               @id @default(autoincrement())
+  name                            String                            @unique @db.VarChar(150)
+  category                        String?                           @db.VarChar(100)
+  description                     String?
+  created_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  disease_symptoms                disease_symptoms[]
+  examination_symptoms            examination_symptoms[]
+  patient_symptom_report_items    patient_symptom_report_items[]
+  symptom_product_recommendations symptom_product_recommendations[]
+}
+
+model users {
+  id                                                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id                                            Int                @db.SmallInt
+  full_name                                          String             @db.VarChar(150)
+  phone                                              String?            @unique @db.VarChar(20)
+  email                                              String?            @unique @db.VarChar(150)
+  password_hash                                      String
+  avatar_url                                         String?
+  status                                             user_status        @default(active)
+  created_at                                         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                                         DateTime           @default(now()) @db.Timestamptz(6)
+  appointments_appointments_assigned_staff_idTousers appointments[]     @relation("appointments_assigned_staff_idTousers")
+  appointments_appointments_created_byTousers        appointments[]     @relation("appointments_created_byTousers")
+  cskh_assignments                                   cskh_assignments[]
+  cskh_care_logs                                     cskh_care_logs[]
+  examinations                                       examinations[]
+  notifications                                      notifications[]
+  patients_patients_assigned_cskh_idTousers          patients[]         @relation("patients_assigned_cskh_idTousers")
+  patients_patients_user_idTousers                   patients[]         @relation("patients_user_idTousers")
+  prescriptions                                      prescriptions[]
+  roles                                              roles              @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([phone], map: "idx_users_phone")
+  @@index([role_id], map: "idx_users_role")
+}
+
+enum appointment_status {
+  pending
+  confirmed
+  in_progress
+  completed
+  cancelled
+  no_show
+}
+
+enum appointment_type {
+  first_visit
+  follow_up
+  emergency
+}
+
+enum care_interaction_type {
+  call
+  message
+  zalo
+  email
+  home_visit
+  other
+}
+
+enum followup_status {
+  scheduled
+  reminded
+  confirmed
+  completed
+  missed
+  cancelled
+}
+
+enum gender_type {
+  male
+  female
+  other
+}
+
+enum notification_status {
+  pending
+  sent
+  failed
+  read
+}
+
+enum notification_type {
+  follow_up_reminder
+  appointment_confirmation
+  cskh_care
+  system
+  medicine_reminder
+}
+
+enum product_status {
+  active
+  discontinued
+  out_of_stock
+}
+
+enum product_type {
+  medicine
+  supplement
+}
+
+enum severity_level {
+  mild
+  moderate
+  severe
+}
+
+enum user_status {
+  active
+  inactive
+  locked
+}
