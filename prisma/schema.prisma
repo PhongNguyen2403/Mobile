@@ -23,10 +23,43 @@ model appointments {
   users_appointments_created_byTousers        users?             @relation("appointments_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   patients                                    patients           @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   examinations                                examinations[]
+  reschedule_proposals                       appointment_reschedule_proposals[]
 
   @@index([patient_id], map: "idx_appointments_patient")
   @@index([scheduled_at], map: "idx_appointments_scheduled")
   @@index([assigned_staff_id], map: "idx_appointments_staff")
+}
+
+model appointment_reschedule_proposals {
+  id                    String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  appointment_id        String                              @db.Uuid
+  proposed_by           String                              @db.Uuid
+  original_staff_id     String?                             @db.Uuid
+  original_scheduled_at DateTime                            @db.Timestamptz(6)
+  reason                String
+  status                appointment_reschedule_status      @default(pending_patient)
+  created_at            DateTime                            @default(now()) @db.Timestamptz(6)
+  responded_at          DateTime?                           @db.Timestamptz(6)
+  appointments          appointments                        @relation(fields: [appointment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  proposed_by_user      users                               @relation("appointment_reschedule_proposed_by", fields: [proposed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  original_staff        users?                              @relation("appointment_reschedule_original_staff", fields: [original_staff_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  options               appointment_reschedule_options[]
+
+  @@index([appointment_id, status], map: "idx_reschedule_proposals_appointment_status")
+  @@index([proposed_by], map: "idx_reschedule_proposals_user")
+}
+
+model appointment_reschedule_options {
+  id            String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  proposal_id   String                           @db.Uuid
+  staff_id      String                           @db.Uuid
+  scheduled_at  DateTime                         @db.Timestamptz(6)
+  selected_at   DateTime?                        @db.Timestamptz(6)
+  proposal      appointment_reschedule_proposals @relation(fields: [proposal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  staff         users                            @relation("appointment_reschedule_option_staff", fields: [staff_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([proposal_id, staff_id, scheduled_at], map: "uq_reschedule_options_proposal_staff_time")
+  @@index([staff_id, scheduled_at], map: "idx_reschedule_options_staff_time")
 }
 
 model body_parts {
@@ -358,6 +391,9 @@ model users {
   updated_at                                         DateTime           @default(now()) @db.Timestamptz(6)
   appointments_appointments_assigned_staff_idTousers appointments[]     @relation("appointments_assigned_staff_idTousers")
   appointments_appointments_created_byTousers        appointments[]     @relation("appointments_created_byTousers")
+  appointment_reschedule_proposals_proposed_by       appointment_reschedule_proposals[] @relation("appointment_reschedule_proposed_by")
+  appointment_reschedule_proposals_original_staff    appointment_reschedule_proposals[] @relation("appointment_reschedule_original_staff")
+  appointment_reschedule_options_staff               appointment_reschedule_options[]   @relation("appointment_reschedule_option_staff")
   cskh_assignments                                   cskh_assignments[]
   cskh_care_logs                                     cskh_care_logs[]
   examinations                                       examinations[]
@@ -374,10 +410,18 @@ model users {
 enum appointment_status {
   pending
   confirmed
+  reschedule_pending
   in_progress
   completed
   cancelled
   no_show
+}
+
+enum appointment_reschedule_status {
+  pending_patient
+  accepted
+  rejected
+  cancelled
 }
 
 enum appointment_type {

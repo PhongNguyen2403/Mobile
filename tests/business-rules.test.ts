@@ -1,4 +1,14 @@
 import assert from 'assert';
+import {
+  canCreateRescheduleProposal,
+  getDoctorSlotConflictWindow,
+  resolveRescheduleDecision,
+} from '../src/modules/appointments/appointment.rules';
+import {
+  createAppointmentSchema,
+  createRescheduleProposalSchema,
+  respondToRescheduleProposalSchema,
+} from '../src/modules/appointments/appointment.schema';
 
 /**
  * Test Suite: Business Logic Verification
@@ -100,6 +110,78 @@ async function runTests() {
   assert.strictEqual(recommendationResponse.is_reference_only, true, 'is_reference_only phải luôn là true');
   assert.ok(recommendationResponse.disclaimer.length > 0, 'Phải có disclaimer cảnh báo bệnh nhân');
   console.log('✔ Kiểm thử 4 THÀNH CÔNG: Cảnh báo tham khảo luôn được gắn kèm response.');
+
+  // Test 5: Patient self-booking request
+  console.log('Kiểm thử 5: Bệnh nhân tự đặt lịch không cần patientId hoặc địa chỉ...');
+  assert.strictEqual(createAppointmentSchema.safeParse({
+    body: { scheduledAt: '2030-09-30T09:00:00.000Z' },
+  }).success, true);
+  console.log('✔ Kiểm thử 5 THÀNH CÔNG: patientId lấy từ token, địa chỉ phòng khám không bắt buộc.');
+
+  // Test 6: Appointment reschedule proposal workflow rules
+  console.log('Kiểm thử 6: Quy tắc đề xuất và phản hồi đổi lịch...');
+  assert.strictEqual(canCreateRescheduleProposal('confirmed'), true);
+  assert.strictEqual(canCreateRescheduleProposal('reschedule_pending'), true);
+  assert.strictEqual(canCreateRescheduleProposal('completed'), false);
+
+  const accepted = resolveRescheduleDecision('accept');
+  assert.deepStrictEqual(accepted, {
+    proposalStatus: 'accepted',
+    appointmentStatus: 'confirmed',
+  });
+  const rejected = resolveRescheduleDecision('reject');
+  assert.deepStrictEqual(rejected, {
+    proposalStatus: 'rejected',
+    appointmentStatus: 'reschedule_pending',
+  });
+
+  const conflictWindow = getDoctorSlotConflictWindow(new Date('2030-09-30T09:30:00.000Z'));
+  assert.strictEqual(conflictWindow.after.toISOString(), '2030-09-30T09:00:00.000Z');
+  assert.strictEqual(conflictWindow.before.toISOString(), '2030-09-30T10:00:00.000Z');
+
+  const appointmentId = '00000000-0000-4000-8000-000000000001';
+  const staffId = '00000000-0000-4000-8000-000000000002';
+  const proposalId = '00000000-0000-4000-8000-000000000003';
+  const optionId = '00000000-0000-4000-8000-000000000004';
+  const proposalPayload = {
+    params: { id: appointmentId },
+    body: {
+      reason: 'Bác sĩ có lịch đột xuất',
+      options: [
+        { staffId, scheduledAt: '2030-09-30T09:30:00.000Z' },
+        { staffId, scheduledAt: '2030-09-30T14:00:00.000Z' },
+      ],
+    },
+  };
+  assert.strictEqual(createRescheduleProposalSchema.safeParse(proposalPayload).success, true);
+  assert.strictEqual(
+    createRescheduleProposalSchema.safeParse({
+      ...proposalPayload,
+      body: { ...proposalPayload.body, options: [proposalPayload.body.options[0]] },
+    }).success,
+    false,
+    'Đề xuất phải có ít nhất hai phương án'
+  );
+  assert.strictEqual(createRescheduleProposalSchema.safeParse({
+    ...proposalPayload,
+    body: {
+      ...proposalPayload.body,
+      options: [proposalPayload.body.options[0], proposalPayload.body.options[0]],
+    },
+  }).success, false, 'Không được gửi hai phương án bác sĩ/giờ trùng nhau');
+  assert.strictEqual(respondToRescheduleProposalSchema.safeParse({
+    params: { id: appointmentId, proposalId },
+    body: { decision: 'accept', optionId },
+  }).success, true);
+  assert.strictEqual(respondToRescheduleProposalSchema.safeParse({
+    params: { id: appointmentId, proposalId },
+    body: { decision: 'accept' },
+  }).success, false, 'Chấp nhận phải chỉ rõ phương án được chọn');
+  assert.strictEqual(respondToRescheduleProposalSchema.safeParse({
+    params: { id: appointmentId, proposalId },
+    body: { decision: 'reject' },
+  }).success, true);
+  console.log('✔ Kiểm thử 6 THÀNH CÔNG: Proposal, lựa chọn và từ chối được validate.');
 
   console.log('=== TẤT CẢ CÁC BÀI KIỂM THỬ NGHIỆP VỤ ĐÃ VƯỢT QUA 100%! ===');
 }

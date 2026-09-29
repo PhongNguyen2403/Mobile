@@ -8,6 +8,8 @@ import {
   updateAppointmentStatusSchema,
   assignAppointmentStaffSchema,
   listAppointmentsQuerySchema,
+  createRescheduleProposalSchema,
+  respondToRescheduleProposalSchema,
 } from './appointment.schema';
 
 const router = Router();
@@ -16,6 +18,7 @@ router.use(authGuard);
 
 router.post(
   '/',
+  roleGuard('patient', 'admin', 'cskh'),
   validate(createAppointmentSchema),
   AppointmentController.createAppointment
 );
@@ -40,6 +43,20 @@ router.patch(
   roleGuard('admin', 'cskh'),
   validate(assignAppointmentStaffSchema),
   AppointmentController.assignStaff
+);
+
+router.post(
+  '/:id/reschedule-proposals',
+  roleGuard('admin', 'cskh'),
+  validate(createRescheduleProposalSchema),
+  AppointmentController.createRescheduleProposal
+);
+
+router.post(
+  '/:id/reschedule-proposals/:proposalId/respond',
+  roleGuard('patient'),
+  validate(respondToRescheduleProposalSchema),
+  AppointmentController.respondToRescheduleProposal
 );
 
 export default router;

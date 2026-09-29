@@ -1,15 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppointmentService } from './appointment.service';
 import { ApiResponse } from '../../utils/response.util';
+import { BadRequestError, ForbiddenError } from '../../middlewares/error.middleware';
 
 export class AppointmentController {
   static async createAppointment(req: Request, res: Response, next: NextFunction) {
     try {
       const createdBy = req.user?.userId ? String(req.user.userId) : undefined;
-      // Nếu bệnh nhân tự đặt lịch, lấy patientId từ token nếu không truyền
-      let patientId = req.body.patientId;
-      if (req.user?.role === 'patient' && req.user.patientId) {
-        patientId = String(req.user.patientId);
+      const patientId = req.user?.role === 'patient'
+        ? req.user.patientId
+        : req.body.patientId;
+      if (!patientId) {
+        throw new BadRequestError('Không xác định được hồ sơ bệnh nhân');
       }
 
       const appointment = await AppointmentService.createAppointment({
@@ -21,7 +23,7 @@ export class AppointmentController {
       return ApiResponse.success({
         res,
         statusCode: 201,
-        message: 'Đặt lịch khám tại nhà thành công',
+        message: 'Đặt lịch khám tại phòng khám thành công',
         data: appointment,
       });
     } catch (err) {
@@ -59,6 +61,12 @@ export class AppointmentController {
   static async getAppointmentById(req: Request, res: Response, next: NextFunction) {
     try {
       const appointment = await AppointmentService.getAppointmentById(req.params.id);
+      if (
+        req.user?.role === 'patient' &&
+        String(appointment.patient_id) !== String(req.user.patientId)
+      ) {
+        throw new ForbiddenError('Bệnh nhân chỉ có quyền xem lịch hẹn của chính mình');
+      }
       return ApiResponse.success({
         res,
         message: 'Lấy thông tin lịch hẹn thành công',
@@ -90,12 +98,59 @@ export class AppointmentController {
     try {
       const updated = await AppointmentService.assignStaff(
         req.params.id,
-        req.body.staffId
+        req.body.staffId,
+        req.body.scheduledAt
       );
       return ApiResponse.success({
         res,
         message: 'Phân công nhân viên phụ trách lịch hẹn thành công',
         data: updated,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async createRescheduleProposal(req: Request, res: Response, next: NextFunction) {
+    try {
+      const proposedBy = req.user?.userId ? String(req.user.userId) : undefined;
+      if (!proposedBy) throw new BadRequestError('Không xác định được nhân viên CSKH');
+
+      const proposal = await AppointmentService.createRescheduleProposal(
+        req.params.id,
+        proposedBy,
+        req.body.reason,
+        req.body.options
+      );
+      return ApiResponse.success({
+        res,
+        statusCode: 201,
+        message: 'Đã gửi đề xuất đổi lịch cho bệnh nhân',
+        data: proposal,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async respondToRescheduleProposal(req: Request, res: Response, next: NextFunction) {
+    try {
+      const patientId = req.user?.patientId ? String(req.user.patientId) : undefined;
+      if (!patientId) throw new ForbiddenError('Tài khoản không liên kết với hồ sơ bệnh nhân');
+
+      const result = await AppointmentService.respondToRescheduleProposal(
+        req.params.id,
+        req.params.proposalId,
+        patientId,
+        req.body.decision,
+        req.body.optionId
+      );
+      return ApiResponse.success({
+        res,
+        message: req.body.decision === 'accept'
+          ? 'Đã xác nhận phương án đổi lịch'
+          : 'Đã từ chối các phương án đổi lịch; CSKH sẽ xử lý tiếp',
+        data: result,
       });
     } catch (err) {
       next(err);
