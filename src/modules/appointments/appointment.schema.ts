@@ -19,6 +19,78 @@ export const appointmentIdParamSchema = z.object({
   }),
 });
 
+export const requestAppointmentChangeSchema = z.object({
+  params: z.object({
+    id: z.string().uuid('ID lịch hẹn không đúng định dạng UUID'),
+  }),
+  body: z.discriminatedUnion('action', [
+    z.object({
+      action: z.literal('reschedule'),
+      requestedScheduledAt: z.string().datetime({
+        message: 'Thời gian khám mới phải theo chuẩn ISO',
+      }),
+      reason: z.string().trim().max(500, 'Lý do tối đa 500 ký tự').optional(),
+    }),
+    z.object({
+      action: z.literal('cancel'),
+      reason: z.string().trim().max(500, 'Lý do tối đa 500 ký tự').optional(),
+    }),
+  ]),
+});
+
+export const requestDoctorAppointmentChangeSchema = z.object({
+  params: z.object({
+    id: z.string().uuid('ID lịch hẹn không đúng định dạng UUID'),
+  }),
+  body: z.object({
+    action: z.enum(['reschedule', 'cancel']),
+    reason: z.string().trim().min(1, 'Vui lòng nhập lý do').max(500, 'Lý do tối đa 500 ký tự'),
+  }),
+});
+
+export const listAppointmentChangeRequestsSchema = z.object({
+  query: z.object({
+    page: z.string().optional(),
+    limit: z.string().optional(),
+    status: z.enum(['pending', 'awaiting_patient', 'approved', 'rejected']).optional(),
+    appointmentId: z.string().uuid('ID lịch hẹn không hợp lệ').optional(),
+  }),
+});
+
+export const reviewAppointmentChangeRequestSchema = z.object({
+  params: z.object({
+    requestId: z.string().uuid('ID yêu cầu không hợp lệ'),
+  }),
+  body: z.object({
+    decision: z.enum(['approved', 'rejected']),
+    reviewNote: z.string().trim().max(500, 'Ghi chú xử lý tối đa 500 ký tự').optional(),
+    assignedStaffId: z.string().uuid('ID bác sĩ mới không hợp lệ').optional(),
+  }),
+});
+
+export const notifyChangeRequestPatientSchema = z.object({
+  params: z.object({
+    requestId: z.string().uuid('ID yêu cầu không hợp lệ'),
+  }),
+});
+
+export const submitChangeRequestPatientChoiceSchema = z.object({
+  params: z.object({
+    requestId: z.string().uuid('ID yêu cầu không hợp lệ'),
+  }),
+  body: z.discriminatedUnion('choice', [
+    z.object({
+      choice: z.literal('reschedule'),
+      requestedScheduledAt: z.string().datetime({
+        message: 'Thời gian khám mới phải theo chuẩn ISO',
+      }),
+    }),
+    z.object({
+      choice: z.literal('change_doctor'),
+    }),
+  ]),
+});
+
 export const updateAppointmentStatusSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
   body: z.object({

@@ -1,6 +1,10 @@
 import { prisma } from '../../config/database';
 import { NotFoundError, BadRequestError } from '../../middlewares/error.middleware';
 import { serializeBigInt } from '../../utils/bigint.util';
+import {
+  assertAppointmentDuringBusinessHours,
+  assertAppointmentInFuture,
+} from '../../utils/appointment-hours.util';
 
 export class BodyMapService {
   /**
@@ -143,6 +147,10 @@ export class BodyMapService {
     reportId: string,
     data: { scheduledAt: string; visitAddress: string; note?: string; createdBy?: string }
   ) {
+    const scheduledAt = new Date(data.scheduledAt);
+    assertAppointmentInFuture(scheduledAt);
+    assertAppointmentDuringBusinessHours(scheduledAt);
+
     const report = await prisma.patient_symptom_reports.findUnique({
       where: { id: reportId },
     });
@@ -152,7 +160,7 @@ export class BodyMapService {
     const appointment = await prisma.appointments.create({
       data: {
         patient_id: report.patient_id,
-        scheduled_at: new Date(data.scheduledAt),
+        scheduled_at: scheduledAt,
         visit_address: data.visitAddress,
         status: 'pending',
         type: 'first_visit',

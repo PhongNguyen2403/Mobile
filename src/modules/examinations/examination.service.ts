@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database';
 import { NotFoundError, BadRequestError } from '../../middlewares/error.middleware';
 import { serializeBigInt } from '../../utils/bigint.util';
+import { assertAppointmentCanStart } from '../../utils/appointment-hours.util';
 
 export class ExaminationService {
   /**
@@ -33,6 +34,13 @@ export class ExaminationService {
     if (!patient) throw new NotFoundError('Không tìm thấy hồ sơ bệnh nhân');
 
     return await prisma.$transaction(async (tx) => {
+      const currentAppointment = await tx.appointments.findUnique({
+        where: { id: data.appointmentId },
+        select: { scheduled_at: true },
+      });
+      if (!currentAppointment) throw new NotFoundError('Không tìm thấy lịch hẹn khám');
+      assertAppointmentCanStart(currentAppointment.scheduled_at);
+
       // 1. Tạo bản ghi examination
       const exam = await tx.examinations.create({
         data: {
@@ -292,4 +300,3 @@ export class ExaminationService {
     return serializeBigInt(Array.from(patientMap.values()));
   }
 }
-
