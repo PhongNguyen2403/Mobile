@@ -195,4 +195,101 @@ export class ExaminationService {
 
     return serializeBigInt(exams);
   }
+
+  static async getDoctorPatients(doctorId?: string) {
+    if (!doctorId) {
+      throw new BadRequestError('Thiếu thông tin bác sĩ');
+    }
+
+    // 1. Tìm các lượt khám mà bác sĩ này đã thực hiện
+    const exams = await prisma.examinations.findMany({
+      where: { doctor_id: doctorId },
+      orderBy: { examined_at: 'desc' },
+      include: {
+        patients: true,
+        diseases: true,
+        appointments: true,
+        prescriptions: {
+          include: {
+            prescription_items: { include: { products: true } },
+          },
+        },
+      },
+    });
+
+    // 2. Tìm các lịch hẹn khám mà bác sĩ này được chỉ định phụ trách
+    const appointments = await prisma.appointments.findMany({
+      where: { assigned_staff_id: doctorId },
+      orderBy: { scheduled_at: 'desc' },
+      include: {
+        patients: true,
+        examinations: {
+          include: { diseases: true },
+        },
+      },
+    });
+
+    // 3. Gom nhóm theo bệnh nhân duy nhất (Unique Patients)
+    const patientMap = new Map<string, any>();
+
+    // Xử lý từ examinations đã hoàn tất
+    for (const exam of exams) {
+      const p = exam.patients;
+      if (!p) continue;
+      if (!patientMap.has(p.id)) {
+        patientMap.set(p.id, {
+          id: p.id,
+          full_name: p.full_name,
+          phone: p.phone,
+          address: p.address,
+          gender: p.gender,
+          date_of_birth: p.date_of_birth,
+          total_examinations: 0,
+          last_examined_at: exam.examined_at,
+          last_diagnosis: exam.diseases?.name || exam.diagnosis_note || 'Khám bệnh tại nhà',
+          last_icd_code: exam.diseases?.icd_code || null,
+          has_pending_visit: false,
+          latest_appointment_id: exam.appointment_id,
+          latest_appointment_status: exam.appointments?.status || 'completed',
+        });
+      }
+      const existing = patientMap.get(p.id);
+      existing.total_examinations += 1;
+    }
+
+    // Bổ sung các bệnh nhân từ lịch hẹn
+    for (const apt of appointments) {
+      const p = apt.patients;
+      if (!p) continue;
+      if (!patientMap.has(p.id)) {
+        patientMap.set(p.id, {
+          id: p.id,
+          full_name: p.full_name,
+          phone: p.phone,
+          address: apt.visit_address || p.address,
+          gender: p.gender,
+          date_of_birth: p.date_of_birth,
+          total_examinations: apt.examinations?.length || 0,
+          last_examined_at: apt.scheduled_at,
+          last_diagnosis: apt.note || 'Lịch hẹn khám tại nhà',
+          last_icd_code: null,
+          has_pending_visit: apt.status === 'confirmed' || apt.status === 'in_progress',
+          latest_appointment_id: apt.id,
+          latest_appointment_status: apt.status,
+          initial_symptoms: apt.note,
+        });
+      } else {
+        const existing = patientMap.get(p.id);
+        if (apt.status === 'confirmed' || apt.status === 'in_progress') {
+          existing.has_pending_visit = true;
+          existing.latest_appointment_id = apt.id;
+          existing.latest_appointment_status = apt.status;
+          existing.initial_symptoms = apt.note;
+        }
+      }
+    }
+
+    return serializeBigInt(Array.from(patientMap.values()));
+  }
 }
+

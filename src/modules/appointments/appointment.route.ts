@@ -5,6 +5,7 @@ import { roleGuard } from '../../middlewares/role.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import {
   createAppointmentSchema,
+  appointmentIdParamSchema,
   updateAppointmentStatusSchema,
   assignAppointmentStaffSchema,
   listAppointmentsQuerySchema,
@@ -26,7 +27,11 @@ router.get(
   AppointmentController.getAppointments
 );
 
-router.get('/:id', AppointmentController.getAppointmentById);
+router.get(
+  '/:id',
+  validate(appointmentIdParamSchema),
+  AppointmentController.getAppointmentById
+);
 
 router.patch(
   '/:id/status',

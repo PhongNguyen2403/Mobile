@@ -11,6 +11,12 @@ export const createAppointmentSchema = z.object({
   }),
 });
 
+export const appointmentIdParamSchema = z.object({
+  params: z.object({
+    id: z.string().uuid('ID lịch hẹn không đúng định dạng UUID'),
+  }),
+});
+
 export const updateAppointmentStatusSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
   body: z.object({

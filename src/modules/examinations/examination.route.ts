@@ -19,6 +19,12 @@ router.post(
   ExaminationController.createExamination
 );
 
+router.get(
+  '/doctor/my-patients',
+  roleGuard('admin', 'doctor'),
+  ExaminationController.getDoctorPatients
+);
+
 router.get('/:id', ExaminationController.getExaminationById);
 
 router.post(

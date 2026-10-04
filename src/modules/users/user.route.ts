@@ -23,14 +23,14 @@ router.post(
 
 router.get(
   '/',
-  roleGuard('admin', 'cskh', 'doctor', 'nurse'),
+  roleGuard('admin', 'cskh', 'doctor', 'nurse', 'patient'),
   validate(listUsersQuerySchema),
   UserController.getUsers
 );
 
 router.get(
   '/:id',
-  roleGuard('admin', 'cskh', 'doctor', 'nurse'),
+  roleGuard('admin', 'cskh', 'doctor', 'nurse', 'patient'),
   UserController.getUserById
 );
 

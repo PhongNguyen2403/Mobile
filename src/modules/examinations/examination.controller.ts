@@ -62,4 +62,19 @@ export class ExaminationController {
       next(err);
     }
   }
+
+  static async getDoctorPatients(req: Request, res: Response, next: NextFunction) {
+    try {
+      const doctorId = req.user?.userId ? String(req.user.userId) : undefined;
+      const patients = await ExaminationService.getDoctorPatients(doctorId);
+      return ApiResponse.success({
+        res,
+        message: 'Lấy danh sách bệnh nhân của bác sĩ thành công',
+        data: patients,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
 }
+

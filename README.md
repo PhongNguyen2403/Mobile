@@ -83,8 +83,10 @@ Server sẽ khởi chạy tại: **`http://localhost:3000`**
 
 ---
 
-## 📖 Tài Liệu API & Kiểm Tra Hoạt Động
+## 📖 Tài Liệu Dự Án & API
 
+- **Tài Liệu Đặc Tả Nghiệp Vụ Toàn Diện (Business Docs)**:
+  👉 [docs/BUSINESS_DOCS.md](./docs/BUSINESS_DOCS.md) *(Bao gồm: Luồng nghiệp vụ, Ma trận phân quyền RBAC, 7 Quy tắc nghiệp vụ cốt lõi, State Machine, ERD và Enums)*
 - **Swagger API Docs (Giao diện trực quan để test API)**:
   👉 [http://localhost:3000/docs](http://localhost:3000/docs)
 - **Health Check Endpoint**:
