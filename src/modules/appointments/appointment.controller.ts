@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppointmentService } from './appointment.service';
 import { ApiResponse } from '../../utils/response.util';
+import { ForbiddenError } from '../../middlewares/error.middleware';
 
 export class AppointmentController {
   static async createAppointment(req: Request, res: Response, next: NextFunction) {
@@ -82,6 +83,138 @@ export class AppointmentController {
         res,
         message: 'Lấy thông tin lịch hẹn thành công',
         data: appointment,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async requestChange(req: Request, res: Response, next: NextFunction) {
+    try {
+      const patientId = req.user?.patientId;
+      if (!patientId) {
+        throw new ForbiddenError('Tài khoản bệnh nhân chưa được liên kết với hồ sơ bệnh nhân');
+      }
+
+      const request = await AppointmentService.requestAppointmentChange(
+        req.params.id,
+        String(patientId),
+        req.body
+      );
+      return ApiResponse.success({
+        res,
+        statusCode: 201,
+        message: 'Yêu cầu thay đổi lịch hẹn đã được gửi đến nhân viên phụ trách',
+        data: request,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async requestDoctorChange(req: Request, res: Response, next: NextFunction) {
+    try {
+      const doctorId = req.user?.userId;
+      if (!doctorId) throw new ForbiddenError('Tài khoản bác sĩ không hợp lệ');
+
+      const request = await AppointmentService.requestDoctorAppointmentChange(
+        req.params.id,
+        String(doctorId),
+        req.body
+      );
+      return ApiResponse.success({
+        res,
+        statusCode: 201,
+        message: 'Yêu cầu thay đổi lịch đã được gửi đến CSKH',
+        data: request,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getChangeRequests(req: Request, res: Response, next: NextFunction) {
+    try {
+      const patientId =
+        req.user?.role === 'patient' ? req.user.patientId : undefined;
+      if (req.user?.role === 'patient' && !patientId) {
+        throw new ForbiddenError('Tài khoản bệnh nhân chưa được liên kết với hồ sơ bệnh nhân');
+      }
+
+      const result = await AppointmentService.getAppointmentChangeRequests(
+        req.query,
+        patientId ? String(patientId) : undefined
+      );
+      return ApiResponse.success({
+        res,
+        message: 'Lấy danh sách yêu cầu thay đổi lịch hẹn thành công',
+        data: result.data,
+        meta: result.meta,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async notifyChangeRequestPatient(req: Request, res: Response, next: NextFunction) {
+    try {
+      const request = await AppointmentService.notifyPatientOfDoctorChangeRequest(
+        req.params.requestId
+      );
+      return ApiResponse.success({
+        res,
+        message: 'Đã gửi lựa chọn thay đổi lịch cho bệnh nhân',
+        data: request,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async submitChangeRequestPatientChoice(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) {
+    try {
+      const patientId = req.user?.patientId;
+      if (!patientId) throw new ForbiddenError('Tài khoản bệnh nhân chưa được liên kết');
+
+      const request = await AppointmentService.submitPatientChangeRequestChoice(
+        req.params.requestId,
+        String(patientId),
+        req.body
+      );
+      return ApiResponse.success({
+        res,
+        message: 'Đã ghi nhận lựa chọn của bệnh nhân và gửi CSKH xử lý',
+        data: request,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async reviewChangeRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const reviewerId = req.user?.userId;
+      if (!reviewerId) {
+        throw new ForbiddenError('Tài khoản nhân viên không hợp lệ để xử lý yêu cầu');
+      }
+
+      const request = await AppointmentService.reviewAppointmentChangeRequest(
+        req.params.requestId,
+        String(reviewerId),
+        req.body.decision,
+        req.body.reviewNote,
+        req.body.assignedStaffId
+      );
+      return ApiResponse.success({
+        res,
+        message: req.body.decision === 'approved'
+          ? 'Đã duyệt yêu cầu thay đổi lịch hẹn'
+          : 'Đã từ chối yêu cầu thay đổi lịch hẹn',
+        data: request,
       });
     } catch (err) {
       next(err);

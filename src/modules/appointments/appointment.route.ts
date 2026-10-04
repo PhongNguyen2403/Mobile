@@ -6,6 +6,12 @@ import { validate } from '../../middlewares/validate.middleware';
 import {
   createAppointmentSchema,
   appointmentIdParamSchema,
+  requestAppointmentChangeSchema,
+  requestDoctorAppointmentChangeSchema,
+  listAppointmentChangeRequestsSchema,
+  reviewAppointmentChangeRequestSchema,
+  notifyChangeRequestPatientSchema,
+  submitChangeRequestPatientChoiceSchema,
   updateAppointmentStatusSchema,
   assignAppointmentStaffSchema,
   getDoctorAvailabilitySchema,
@@ -28,6 +34,34 @@ router.get(
   AppointmentController.getAppointments
 );
 
+router.get(
+  '/change-requests',
+  roleGuard('cskh', 'admin', 'patient'),
+  validate(listAppointmentChangeRequestsSchema),
+  AppointmentController.getChangeRequests
+);
+
+router.patch(
+  '/change-requests/:requestId/review',
+  roleGuard('cskh', 'admin'),
+  validate(reviewAppointmentChangeRequestSchema),
+  AppointmentController.reviewChangeRequest
+);
+
+router.post(
+  '/change-requests/:requestId/notify-patient',
+  roleGuard('cskh', 'admin'),
+  validate(notifyChangeRequestPatientSchema),
+  AppointmentController.notifyChangeRequestPatient
+);
+
+router.patch(
+  '/change-requests/:requestId/patient-choice',
+  roleGuard('patient'),
+  validate(submitChangeRequestPatientChoiceSchema),
+  AppointmentController.submitChangeRequestPatientChoice
+);
+
 // Route tra cứu lịch trống an toàn của bác sĩ (đặt TRƯỚC /:id)
 router.get(
   '/doctor-availability',
@@ -39,6 +73,20 @@ router.get(
   '/:id',
   validate(appointmentIdParamSchema),
   AppointmentController.getAppointmentById
+);
+
+router.post(
+  '/:id/change-request',
+  roleGuard('patient'),
+  validate(requestAppointmentChangeSchema),
+  AppointmentController.requestChange
+);
+
+router.post(
+  '/:id/doctor-change-request',
+  roleGuard('doctor'),
+  validate(requestDoctorAppointmentChangeSchema),
+  AppointmentController.requestDoctorChange
 );
 
 router.patch(

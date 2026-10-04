@@ -14,7 +14,8 @@
    - 3.1. Quy trình Khai báo triệu chứng Body Map & Đặt lịch khám
    - 3.2. Quy trình Khám chữa bệnh tại nhà & Kê đơn thuốc (Bác sĩ)
    - 3.3. Quy trình Phân công & Chăm sóc khách hàng (CSKH)
-   - 3.4. Chu trình Tự động nhắc lịch Tái khám (Cron Job)
+   - 3.4. Quy trình Bác sĩ yêu cầu đổi/hủy lịch hẹn
+   - 3.5. Chu trình Tự động nhắc lịch Tái khám (Cron Job)
 4. [CÁC QUY TẮC NGHIỆP VỤ CỐT LÕI (CORE BUSINESS RULES)](#4-các-quy-tắc-nghiệp-vụ-cốt-lõi-core-business-rules)
    - Rule 1: Nguyên tắc Phân công CSKH độc quyền
    - Rule 2: Phân lập Dữ liệu tự khai và Dữ liệu lâm sàng
@@ -70,6 +71,8 @@ flowchart LR
 | **Đặt lịch hẹn khám tại nhà** | ✅ | ❌ | ❌ | ✅ (hộ) | ✅ |
 | **Xem danh sách lịch hẹn** | ✅ (chính mình)| ✅ (được phân) | ✅ (được phân) | ✅ (toàn bộ) | ✅ (toàn bộ) |
 | **Cập nhật trạng thái lịch hẹn** | ❌ | ✅ | ✅ | ✅ | ✅ |
+| **Gửi yêu cầu đổi/hủy lịch bác sĩ phụ trách** | ❌ | ✅ (lịch được phân công) | ❌ | ❌ | ❌ |
+| **Xem và xử lý yêu cầu đổi/hủy lịch** | ✅ (chọn phương án) | ❌ | ❌ | ✅ | ✅ |
 | **Phân công Bác sĩ/Điều dưỡng** | ❌ | ❌ | ❌ | ✅ | ✅ |
 | **Ghi nhận kết quả khám & chẩn đoán**| ❌ | ✅ | ❌ | ❌ | ✅ |
 | **Kê đơn thuốc điện tử** | ❌ | ✅ | ❌ | ❌ | ✅ |
@@ -146,7 +149,67 @@ flowchart TD
     I --> J[Ghi nhật ký: POST /api/cskh/care-logs]
 ```
 
-### 3.4. Chu trình Tự động nhắc lịch Tái khám (Cron Job)
+### 3.4. Quy trình Bác sĩ yêu cầu đổi/hủy lịch hẹn
+Bác sĩ không tự ý đổi hoặc hủy lịch đã phân công. CSKH tiếp nhận yêu cầu, thông báo để bệnh nhân chọn phương án; sau lựa chọn, CSKH duyệt đổi giờ hoặc phân công bác sĩ thay thế.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor D as Bác sĩ phụ trách
+    participant API as Backend
+    participant DB as Database
+    actor C as CSKH
+    actor P as Bệnh nhân
+    actor D2 as Bác sĩ thay thế
+
+    D->>API: POST /api/appointments/:id/doctor-change-request<br/>{action: reschedule | cancel, reason}
+    API->>API: Xác thực bác sĩ được phân công<br/>và lịch chưa bắt đầu khám
+    API->>DB: Tạo appointment_change_request<br/>initiated_by_role=doctor, status=pending
+    API->>DB: Tạo notification cho CSKH phụ trách
+    API-->>D: Xác nhận đã gửi yêu cầu
+
+    C->>API: GET /api/appointments/change-requests?status=pending
+    API-->>C: Danh sách yêu cầu kèm lịch hẹn và bệnh nhân
+    C->>API: POST /api/appointments/change-requests/:requestId/notify-patient
+    API->>DB: Chuyển yêu cầu sang awaiting_patient
+    API->>DB: Tạo notification cho bệnh nhân
+    API-->>P: Thông báo chọn đổi ngày hoặc đổi bác sĩ
+    P->>API: GET /api/appointments/change-requests?status=awaiting_patient
+    Note over API,DB: Backend lấy patient_id từ token,<br/>không nhận patient_id từ query
+    API-->>P: Danh sách yêu cầu đang chờ lựa chọn của chính bệnh nhân
+
+    alt Bệnh nhân chọn đổi ngày
+        P->>API: PATCH /api/appointments/change-requests/:requestId/patient-choice<br/>{choice: reschedule, requestedScheduledAt}
+    else Bệnh nhân chọn đổi bác sĩ
+        P->>API: PATCH /api/appointments/change-requests/:requestId/patient-choice<br/>{choice: change_doctor}
+    end
+    API->>DB: Lưu lựa chọn; chuyển về pending
+    API->>DB: Tạo notification cho CSKH
+    API-->>C: Yêu cầu được đưa lại vào hàng đợi xử lý
+
+    alt Bệnh nhân chọn đổi ngày
+        C->>API: PATCH /api/appointments/change-requests/:requestId/review<br/>{decision: approved}
+        API->>API: Kiểm tra giờ làm và trùng lịch bác sĩ
+        API->>DB: Cập nhật scheduled_at và đánh dấu approved
+    else Bệnh nhân chọn đổi bác sĩ
+        C->>API: PATCH /api/appointments/change-requests/:requestId/review<br/>{decision: approved, assignedStaffId}
+        API->>API: Kiểm tra bác sĩ thay thế đang hoạt động<br/>và không trùng lịch
+        API->>DB: Cập nhật assigned_staff_id và đánh dấu approved
+        API->>DB: Tạo notification cho bác sĩ thay thế
+        API-->>D2: Thông báo được phân công lịch khám
+    end
+    API->>DB: Gửi notification kết quả cho bệnh nhân
+    API-->>P: Thông báo kết quả xử lý
+```
+
+**Quy tắc xử lý**
+- Chỉ bác sĩ đang được phân công mới gửi yêu cầu cho lịch đó; lịch phải ở trạng thái chưa bắt đầu khám (`pending` hoặc `confirmed`) và chưa đến giờ hẹn.
+- Khi bác sĩ gửi yêu cầu, lịch hiện tại không tự thay đổi. CSKH thông báo bệnh nhân trước khi yêu cầu chuyển sang `awaiting_patient`.
+- Bệnh nhân chọn một trong hai phương án: đổi ngày/giờ trong khung 07:00–21:00 (lượt khám 30 phút) hoặc đổi sang bác sĩ khác. Bệnh nhân không trực tiếp chọn bác sĩ thay thế.
+- Lựa chọn của bệnh nhân đưa yêu cầu về `pending` để CSKH xử lý. Với phương án đổi bác sĩ, CSKH phải gửi `assignedStaffId` khi duyệt; backend xác thực người được phân công là bác sĩ đang hoạt động và kiểm tra trùng lịch.
+- Nếu CSKH từ chối, lịch không đổi; bệnh nhân nhận thông báo kết quả. Các bước duyệt và cập nhật lịch được thực hiện trong transaction để tránh cập nhật dở dang.
+
+### 3.5. Chu trình Tự động nhắc lịch Tái khám (Cron Job)
 Cơ chế tự động hóa vận hành mỗi 07:00 sáng hằng ngày:
 
 ```mermaid
@@ -303,6 +366,7 @@ erDiagram
 | `symptom_product_recommendations` | Cấu hình gợi ý sản phẩm tham khảo theo triệu chứng sơ bộ. |
 | `disease_product_recommendations` | Cấu hình gợi ý sản phẩm tham khảo theo bệnh lý sơ bộ. |
 | `appointments` | Lịch hẹn khám chữa bệnh tại nhà của bệnh nhân (Thời gian hẹn, địa chỉ khám, trạng thái). |
+| `appointment_change_requests` | Lưu yêu cầu đổi/hủy lịch của bệnh nhân, thời gian mong muốn, lý do và trạng thái duyệt của nhân viên. |
 | `examinations` | Hồ sơ kết quả khám bệnh tại nhà do Bác sĩ lập (Chẩn đoán, ghi chú lâm sàng, ngày hẹn tái khám). |
 | `examination_symptoms` | Các triệu chứng lâm sàng thực tế được Bác sĩ kiểm tra và xác nhận trong buổi khám. |
 | `prescriptions` | Đơn thuốc điện tử chính thức được Bác sĩ ban hành sau buổi khám. |
@@ -329,7 +393,29 @@ erDiagram
 - `follow_up`: Khám tái khám theo chỉ định của đợt khám trước đó.
 - `emergency`: Yêu cầu khám ưu tiên khẩn cấp tại nhà.
 
-### 6.3. Trạng thái Tái khám (`followup_status`)
+### 6.3. Yêu cầu thay đổi lịch hẹn
+- `appointment_change_action`: `reschedule` (yêu cầu đổi ngày/giờ) hoặc `cancel` (yêu cầu hủy lịch).
+- `appointment_change_request_status`: `pending` (chờ CSKH xử lý), `awaiting_patient` (đang chờ bệnh nhân chọn phương án), `approved` (đã duyệt) hoặc `rejected` (đã từ chối).
+- `initiated_by_role` ghi nhận `patient` hoặc `doctor`; `patient_choice` ghi nhận `reschedule` hoặc `change_doctor`.
+- Mỗi yêu cầu liên kết với lịch hẹn và bệnh nhân; người duyệt, thời điểm duyệt và ghi chú xử lý được lưu riêng để bảo toàn lịch sử.
+- Bệnh nhân gửi yêu cầu tại `POST /api/appointments/:id/change-request` với `action` là `reschedule` kèm `requestedScheduledAt` theo ISO 8601, hoặc `cancel`; có thể gửi thêm `reason`.
+- Chỉ chủ lịch hẹn được gửi yêu cầu khi lịch ở trạng thái `pending`/`confirmed` và chưa đến giờ khám. Yêu cầu được gửi cho CSKH đang phụ trách bệnh nhân; nếu chưa có CSKH phụ trách thì gửi tới các tài khoản CSKH đang hoạt động. Lịch không đổi cho đến khi CSKH xử lý; mỗi lịch chỉ có một yêu cầu `pending` tại một thời điểm.
+- CSKH/Admin lấy hàng đợi bằng `GET /api/appointments/change-requests?status=pending&page=1&limit=10`; có thể lọc thêm `appointmentId` và dùng `status=approved` hoặc `status=rejected` để xem lịch sử.
+- CSKH/Admin xử lý bằng `PATCH /api/appointments/change-requests/:requestId/review` với `{ "decision": "approved" | "rejected", "reviewNote": "..." }`. Duyệt yêu cầu hủy sẽ chuyển lịch sang `cancelled`; duyệt đổi lịch sẽ cập nhật `scheduled_at` sau khi kiểm tra trùng lịch bác sĩ. Từ chối không làm thay đổi lịch. Bệnh nhân nhận thông báo kết quả.
+- Bác sĩ phụ trách yêu cầu đổi/hủy bằng `POST /api/appointments/:id/doctor-change-request` với `{ "action": "reschedule" | "cancel", "reason": "..." }`. Yêu cầu được gửi cho CSKH, chưa tự thay đổi lịch; bác sĩ chỉ được yêu cầu với lịch được phân công và chưa bắt đầu.
+- CSKH thông báo lựa chọn cho bệnh nhân bằng `POST /api/appointments/change-requests/:requestId/notify-patient`. Yêu cầu chuyển sang `awaiting_patient`.
+- Bệnh nhân xem yêu cầu đang chờ lựa chọn bằng `GET /api/appointments/change-requests?status=awaiting_patient` với Bearer token bệnh nhân. Backend lọc theo `patient_id` trong token; không nhận diện bệnh nhân theo query parameter.
+- Bệnh nhân chọn `PATCH /api/appointments/change-requests/:requestId/patient-choice`: `{ "choice": "reschedule", "requestedScheduledAt": "..." }` hoặc `{ "choice": "change_doctor" }`. Lựa chọn được đưa lại vào hàng đợi `pending` cho CSKH.
+- CSKH duyệt đổi ngày bằng review `decision: "approved"`; nếu bệnh nhân chọn bác sĩ khác, gửi thêm `assignedStaffId` để phân công. Hệ thống kiểm tra bác sĩ đang hoạt động và không bị trùng lịch. Việc từ chối yêu cầu gửi thông báo kết quả cho bệnh nhân.
+
+### 6.4. Giờ làm việc và khung giờ khám
+- Giờ nhận lịch khám là 07:00–21:00 theo múi giờ `Asia/Ho_Chi_Minh`; mỗi lượt khám mặc định 30 phút. Vì vậy giờ bắt đầu nhận lịch từ 07:00 đến 20:30 để lượt cuối kết thúc trước 21:00.
+- Không thể tạo lịch hẹn hoặc chuyển phiên triệu chứng thành lịch với thời điểm bằng hoặc sớm hơn thời gian hiện tại. Quy tắc áp dụng cả khi đặt lịch trực tiếp và qua Body Map.
+- Quy tắc giờ làm áp dụng cho đặt lịch trực tiếp, chuyển phiên triệu chứng thành lịch, yêu cầu đổi lịch và lúc CSKH duyệt đổi lịch.
+- `GET /api/appointments/doctor-availability` trả thêm `businessHours` và `availableTimes` (các khung 30 phút chưa qua và chưa bị đặt).
+- Bác sĩ chỉ được chuyển lịch sang `in_progress` hoặc gửi kết quả khám từ thời điểm `scheduled_at` trở đi; trước giờ hẹn API trả lỗi `400`.
+
+### 6.5. Trạng thái Tái khám (`followup_status`)
 - `scheduled`: Đã lên lịch hẹn tái khám trong tương lai.
 - `reminded`: Hệ thống/CSKH đã gửi thông báo nhắc lịch cho bệnh nhân trước ngày khám.
 - `confirmed`: Bệnh nhân đã xác nhận đồng ý ngày giờ tái khám.
@@ -337,7 +423,7 @@ erDiagram
 - `missed`: Bệnh nhân bỏ lỡ lịch tái khám.
 - `cancelled`: Bệnh nhân từ chối hoặc hủy lịch tái khám.
 
-### 6.4. Loại Tương tác Chăm sóc Khách hàng (`care_interaction_type`)
+### 6.6. Loại Tương tác Chăm sóc Khách hàng (`care_interaction_type`)
 - `call`: Gọi điện thoại trực tiếp thăm hỏi sức khỏe.
 - `message`: Nhắn tin SMS.
 - `zalo`: Nhắn tin hoặc gọi điện qua ứng dụng Zalo OA/Zalo cá nhân.
@@ -345,14 +431,14 @@ erDiagram
 - `home_visit`: Thăm hỏi trực tiếp tại nhà bệnh nhân.
 - `other`: Các kênh tương tác khác.
 
-### 6.5. Loại Thông báo (`notification_type`)
+### 6.7. Loại Thông báo (`notification_type`)
 - `follow_up_reminder`: Nhắc nhở lịch tái khám sắp đến hạn.
 - `appointment_confirmation`: Thông báo lịch hẹn khám tại nhà đã được ghi nhận/xác nhận.
 - `cskh_care`: Tin nhắn hỏi thăm sức khỏe sau điều trị từ nhân viên CSKH.
 - `medicine_reminder`: Nhắc nhở uống thuốc đúng giờ theo đơn.
 - `system`: Thông báo hệ thống, phân công công việc nội bộ.
 
-### 6.6. Mức độ Nghiêm trọng của Triệu chứng (`severity_level`)
+### 6.8. Mức độ Nghiêm trọng của Triệu chứng (`severity_level`)
 - `mild`: Nhẹ, chưa ảnh hưởng nhiều đến sinh hoạt.
 - `moderate`: Vừa phải, bắt đầu gây khó chịu hoặc hạn chế vận động.
 - `severe`: Nghiêm trọng, đau dữ dội hoặc có dấu hiệu cảnh báo nguy hiểm.
