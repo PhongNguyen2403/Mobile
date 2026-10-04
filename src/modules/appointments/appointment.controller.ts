@@ -21,8 +21,27 @@ export class AppointmentController {
       return ApiResponse.success({
         res,
         statusCode: 201,
-        message: 'Đặt lịch khám tại nhà thành công',
+        message: 'Đặt lịch khám tại phòng khám thành công',
         data: appointment,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Endpoint công khai/an toàn kiểm tra lịch trống của bác sĩ
+   */
+  static async getDoctorAvailability(req: Request, res: Response, next: NextFunction) {
+    try {
+      const doctorId = String(req.query.doctorId);
+      const date = String(req.query.date);
+
+      const availability = await AppointmentService.getDoctorAvailability(doctorId, date);
+      return ApiResponse.success({
+        res,
+        message: 'Lấy thông tin khung giờ trống của bác sĩ thành công',
+        data: availability,
       });
     } catch (err) {
       next(err);
@@ -74,7 +93,8 @@ export class AppointmentController {
       const updated = await AppointmentService.updateAppointmentStatus(
         req.params.id,
         req.body.status,
-        req.body.note
+        req.body.note,
+        req.body.clinicRoom
       );
       return ApiResponse.success({
         res,
@@ -90,7 +110,8 @@ export class AppointmentController {
     try {
       const updated = await AppointmentService.assignStaff(
         req.params.id,
-        req.body.staffId
+        req.body.staffId,
+        req.body.clinicRoom
       );
       return ApiResponse.success({
         res,

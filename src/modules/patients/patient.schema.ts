@@ -35,6 +35,21 @@ export const updatePatientSchema = z.object({
   }),
 });
 
+export const updatePatientMeSchema = z.object({
+  body: z.object({
+    fullName: z.string().min(2).max(150).optional(),
+    phone: z.string().min(9).max(20).optional(),
+    dateOfBirth: z.string().optional(),
+    gender: z.enum(['male', 'female', 'other']).optional(),
+    address: z.string().optional(),
+    province: z.string().optional(),
+    healthInsuranceNo: z.string().optional(),
+    emergencyContactName: z.string().optional(),
+    emergencyContactPhone: z.string().optional(),
+    note: z.string().optional(),
+  }),
+});
+
 export const createMedicalHistorySchema = z.object({
   params: z.object({
     id: z.string().uuid('ID bệnh nhân không hợp lệ'),

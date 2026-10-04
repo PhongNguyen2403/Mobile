@@ -1,8 +1,58 @@
 import { Request, Response, NextFunction } from 'express';
 import { PatientService } from './patient.service';
 import { ApiResponse } from '../../utils/response.util';
+import { prisma } from '../../config/database';
+import { NotFoundError } from '../../middlewares/error.middleware';
 
 export class PatientController {
+  static async getPatientMe(req: Request, res: Response, next: NextFunction) {
+    try {
+      let patientId = req.user?.patientId ? String(req.user.patientId) : undefined;
+      if (!patientId && req.user?.phone) {
+        const found = await prisma.patients.findFirst({ where: { phone: req.user.phone } });
+        if (found) patientId = found.id;
+      }
+      if (!patientId && req.user?.userId) {
+        patientId = String(req.user.userId);
+      }
+      if (!patientId) {
+        throw new NotFoundError('Không tìm thấy thông tin bệnh nhân tương ứng với phiên đăng nhập');
+      }
+      const patient = await PatientService.getPatientById(patientId);
+      return ApiResponse.success({
+        res,
+        message: 'Lấy thông tin cá nhân bệnh nhân thành công',
+        data: patient,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async updatePatientMe(req: Request, res: Response, next: NextFunction) {
+    try {
+      let patientId = req.user?.patientId ? String(req.user.patientId) : undefined;
+      if (!patientId && req.user?.phone) {
+        const found = await prisma.patients.findFirst({ where: { phone: req.user.phone } });
+        if (found) patientId = found.id;
+      }
+      if (!patientId && req.user?.userId) {
+        patientId = String(req.user.userId);
+      }
+      if (!patientId) {
+        throw new NotFoundError('Không tìm thấy thông tin bệnh nhân tương ứng với phiên đăng nhập');
+      }
+      const patient = await PatientService.updatePatient(patientId, req.body);
+      return ApiResponse.success({
+        res,
+        message: 'Cập nhật thông tin cá nhân bệnh nhân thành công',
+        data: patient,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async createPatient(req: Request, res: Response, next: NextFunction) {
     try {
       const patient = await PatientService.createPatient(req.body);

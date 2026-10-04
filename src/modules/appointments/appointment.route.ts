@@ -8,6 +8,7 @@ import {
   appointmentIdParamSchema,
   updateAppointmentStatusSchema,
   assignAppointmentStaffSchema,
+  getDoctorAvailabilitySchema,
   listAppointmentsQuerySchema,
 } from './appointment.schema';
 
@@ -25,6 +26,13 @@ router.get(
   '/',
   validate(listAppointmentsQuerySchema),
   AppointmentController.getAppointments
+);
+
+// Route tra cứu lịch trống an toàn của bác sĩ (đặt TRƯỚC /:id)
+router.get(
+  '/doctor-availability',
+  validate(getDoctorAvailabilitySchema),
+  AppointmentController.getDoctorAvailability
 );
 
 router.get(

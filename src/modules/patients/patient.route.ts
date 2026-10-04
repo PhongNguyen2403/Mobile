@@ -6,6 +6,7 @@ import { validate } from '../../middlewares/validate.middleware';
 import {
   createPatientSchema,
   updatePatientSchema,
+  updatePatientMeSchema,
   createMedicalHistorySchema,
   listPatientsQuerySchema,
 } from './patient.schema';
@@ -27,6 +28,10 @@ router.get(
   validate(listPatientsQuerySchema),
   PatientController.getPatients
 );
+
+// Lấy và cập nhật hồ sơ cá nhân của chính bệnh nhân hiện tại
+router.get('/me', PatientController.getPatientMe);
+router.patch('/me', validate(updatePatientMeSchema), PatientController.updatePatientMe);
 
 router.get(
   '/:id',
