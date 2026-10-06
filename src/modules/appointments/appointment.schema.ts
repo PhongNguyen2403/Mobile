@@ -48,6 +48,19 @@ export const requestDoctorAppointmentChangeSchema = z.object({
   }),
 });
 
+export const requestDoctorDayOffSchema = z.object({
+  body: z.object({
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày nghỉ phải theo định dạng YYYY-MM-DD')
+      .refine((value) => {
+        const [year, month, day] = value.split('-').map(Number);
+        return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === value;
+      }, 'Ngày nghỉ không hợp lệ'),
+    reason: z.string().trim().min(1, 'Vui lòng nhập lý do').max(500, 'Lý do tối đa 500 ký tự'),
+  }),
+});
+
 export const listAppointmentChangeRequestsSchema = z.object({
   query: z.object({
     page: z.string().optional(),

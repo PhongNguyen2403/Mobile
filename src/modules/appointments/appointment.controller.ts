@@ -38,7 +38,15 @@ export class AppointmentController {
       const doctorId = String(req.query.doctorId);
       const date = String(req.query.date);
 
-      const availability = await AppointmentService.getDoctorAvailability(doctorId, date);
+      const patientId =
+        req.user?.role === 'patient' && req.user.patientId
+          ? String(req.user.patientId)
+          : undefined;
+      const availability = await AppointmentService.getDoctorAvailability(
+        doctorId,
+        date,
+        patientId
+      );
       return ApiResponse.success({
         res,
         message: 'Lấy thông tin khung giờ trống của bác sĩ thành công',
@@ -127,6 +135,26 @@ export class AppointmentController {
         statusCode: 201,
         message: 'Yêu cầu thay đổi lịch đã được gửi đến CSKH',
         data: request,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async requestDoctorDayOff(req: Request, res: Response, next: NextFunction) {
+    try {
+      const doctorId = req.user?.userId;
+      if (!doctorId) throw new ForbiddenError('Tài khoản bác sĩ không hợp lệ');
+
+      const result = await AppointmentService.requestDoctorDayOff(
+        String(doctorId),
+        req.body
+      );
+      return ApiResponse.success({
+        res,
+        statusCode: 201,
+        message: 'Đã gửi yêu cầu đổi lịch cho toàn bộ lịch khám trong ngày nghỉ',
+        data: result,
       });
     } catch (err) {
       next(err);

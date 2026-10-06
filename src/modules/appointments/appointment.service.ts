@@ -65,36 +65,6 @@ export class AppointmentService {
       );
     }
 
-    if (data.assignedStaffId) {
-      const staff = await prisma.users.findUnique({
-        where: { id: data.assignedStaffId },
-        include: { roles: true },
-      });
-      if (!staff) throw new NotFoundError('Không tìm thấy nhân viên được phân công');
-
-      // Chống đặt trùng khung giờ cho bác sĩ (Anti Double-Booking)
-      // Mỗi khung khám mặc định chiếm khoảng 30 phút
-      const slotStart = new Date(scheduledAt.getTime() - 29 * 60 * 1000);
-      const slotEnd = new Date(scheduledAt.getTime() + 29 * 60 * 1000);
-
-      const conflict = await (prisma.appointments as any).findFirst({
-        where: {
-          assigned_staff_id: data.assignedStaffId,
-          status: { in: ['pending', 'confirmed', 'checked_in', 'in_progress'] },
-          scheduled_at: {
-            gte: slotStart,
-            lte: slotEnd,
-          },
-        },
-      });
-
-      if (conflict) {
-        throw new BadRequestError(
-          'Bác sĩ đã có lịch khám trong khung giờ này. Vui lòng chọn khung giờ khác.'
-        );
-      }
-    }
-
     // Nếu có reportId triệu chứng từ Body Map, kiểm tra tồn tại
     if (data.reportId) {
       const report = await prisma.patient_symptom_reports.findUnique({
@@ -103,40 +73,73 @@ export class AppointmentService {
       if (!report) throw new NotFoundError('Không tìm thấy báo cáo triệu chứng Body Map');
     }
 
-    const appointment = await (prisma.appointments as any).create({
-      data: {
-        patient_id: data.patientId,
-        scheduled_at: scheduledAt,
-        visit_address: data.visitAddress || 'Phòng khám Đa khoa',
-        clinic_room: data.clinicRoom || null,
-        report_id: data.reportId || null,
-        type: data.type || 'first_visit',
-        assigned_staff_id: data.assignedStaffId || null,
-        created_by: data.createdBy || null,
-        note: data.note || null,
-        status: 'pending',
-      },
-      include: {
-        patients: { select: { id: true, full_name: true, phone: true } },
-        users_appointments_assigned_staff_idTousers: {
-          select: { id: true, full_name: true, phone: true },
-        },
-      },
-    });
+    const appointment = await prisma.$transaction(async (transaction) => {
+      const staff = data.assignedStaffId
+        ? await transaction.users.findUnique({
+            where: { id: data.assignedStaffId },
+            include: { roles: true },
+          })
+        : null;
+      if (data.assignedStaffId && !staff) {
+        throw new NotFoundError('Không tìm thấy nhân viên được phân công');
+      }
 
-    // Tạo notification thông báo lịch hẹn mới cho bệnh nhân
-    await prisma.notifications.create({
-      data: {
-        patient_id: data.patientId,
-        type: 'appointment_confirmation',
-        title: 'Đặt lịch khám tại phòng khám thành công',
-        content: `Lịch hẹn khám tại phòng khám vào lúc ${new Date(data.scheduledAt).toLocaleString(
-          'vi-VN'
-        )} đã được ghi nhận. Vui lòng có mặt đúng giờ để check-in.`,
-        related_table: 'appointments',
-        related_id: appointment.id,
-        status: 'pending',
-      },
+      await this.lockAppointmentSchedule(
+        transaction,
+        data.patientId,
+        data.assignedStaffId
+      );
+      await this.ensurePatientSlotAvailable(
+        transaction,
+        data.patientId,
+        null,
+        scheduledAt
+      );
+      if (data.assignedStaffId) {
+        await this.ensureDoctorSlotAvailable(
+          transaction,
+          null,
+          data.assignedStaffId,
+          scheduledAt
+        );
+      }
+
+      const createdAppointment = await transaction.appointments.create({
+        data: {
+          patient_id: data.patientId,
+          scheduled_at: scheduledAt,
+          visit_address: data.visitAddress || 'Phòng khám Đa khoa',
+          clinic_room: data.clinicRoom || null,
+          report_id: data.reportId || null,
+          type: data.type || 'first_visit',
+          assigned_staff_id: data.assignedStaffId || null,
+          created_by: data.createdBy || null,
+          note: data.note || null,
+          status: 'pending',
+        },
+        include: {
+          patients: { select: { id: true, full_name: true, phone: true } },
+          users_appointments_assigned_staff_idTousers: {
+            select: { id: true, full_name: true, phone: true },
+          },
+        },
+      });
+
+      await transaction.notifications.create({
+        data: {
+          patient_id: data.patientId,
+          type: 'appointment_confirmation',
+          title: 'Đặt lịch khám tại phòng khám thành công',
+          content: `Lịch hẹn khám tại phòng khám vào lúc ${scheduledAt.toLocaleString(
+            'vi-VN'
+          )} đã được ghi nhận. Vui lòng có mặt đúng giờ để check-in.`,
+          related_table: 'appointments',
+          related_id: createdAppointment.id,
+          status: 'pending',
+        },
+      });
+
+      return createdAppointment;
     });
 
     return serializeBigInt(appointment);
@@ -144,9 +147,13 @@ export class AppointmentService {
 
   /**
    * Endpoint tra cứu lịch trống an toàn cho phòng khám
-   * Chỉ trả về các mốc thời gian đã kín của bác sĩ, KHÔNG làm rò rỉ dữ liệu cá nhân bệnh nhân
+   * Chỉ trả về giờ đã kín của bác sĩ hoặc bệnh nhân đang đăng nhập, không có dữ liệu cá nhân
    */
-  static async getDoctorAvailability(doctorId: string, dateStr: string) {
+  static async getDoctorAvailability(
+    doctorId: string,
+    dateStr: string,
+    patientId?: string
+  ) {
     const doctor = await prisma.users.findUnique({
       where: { id: doctorId },
       select: { id: true, full_name: true },
@@ -156,18 +163,23 @@ export class AppointmentService {
     const startDate = new Date(`${dateStr}T00:00:00.000+07:00`);
     const endDate = new Date(`${dateStr}T23:59:59.999+07:00`);
 
-    const booked = await (prisma.appointments as any).findMany({
+    const booked = await prisma.appointments.findMany({
       where: {
-        assigned_staff_id: doctorId,
+        ...(patientId
+          ? {
+              OR: [
+                { assigned_staff_id: doctorId },
+                { patient_id: patientId },
+              ],
+            }
+          : { assigned_staff_id: doctorId }),
         status: { in: ['pending', 'confirmed', 'checked_in', 'in_progress'] },
         scheduled_at: {
           gte: startDate,
           lte: endDate,
         },
       },
-      select: {
-        scheduled_at: true,
-      },
+      select: { scheduled_at: true },
       orderBy: { scheduled_at: 'asc' },
     });
 
@@ -529,6 +541,119 @@ export class AppointmentService {
     return serializeBigInt(request);
   }
 
+  static async requestDoctorDayOff(
+    doctorId: string,
+    data: { date: string; reason: string }
+  ) {
+    const [year, month, day] = data.date.split('-').map(Number);
+    const dayStart = new Date(Date.UTC(year, month - 1, day) - 7 * 60 * 60 * 1000);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    if (dayStart.getTime() < Date.now() + 24 * 60 * 60 * 1000) {
+      throw new BadRequestError('Yêu cầu nghỉ phải được gửi trước ngày nghỉ ít nhất 24 giờ');
+    }
+
+    return prisma.$transaction(async (transaction) => {
+      const appointments = await transaction.appointments.findMany({
+        where: {
+          assigned_staff_id: doctorId,
+          scheduled_at: { gte: dayStart, lt: dayEnd },
+          status: { notIn: ['cancelled', 'completed', 'no_show', 'rescheduled'] },
+        },
+        include: {
+          patients: {
+            select: {
+              assigned_cskh_id: true,
+              cskh_assignments: {
+                where: { is_active: true },
+                select: { cskh_staff_id: true },
+              },
+            },
+          },
+        },
+        orderBy: { scheduled_at: 'asc' },
+      });
+
+      if (!appointments.length) {
+        throw new BadRequestError('Bạn không có lịch khám cần xử lý trong ngày đã chọn');
+      }
+
+      const unsupportedAppointments = appointments.filter(
+        (appointment) => !['pending', 'confirmed'].includes(appointment.status)
+      );
+      if (unsupportedAppointments.length) {
+        throw new BadRequestError(
+          `${unsupportedAppointments.length} lịch trong ngày đã bắt đầu hoặc không thể đổi; chưa tạo yêu cầu nào`
+        );
+      }
+
+      const existingRequests = await transaction.appointment_change_requests.findMany({
+        where: {
+          appointment_id: { in: appointments.map(({ id }) => id) },
+          status: { in: ['pending', 'awaiting_patient'] },
+        },
+        select: { appointment_id: true },
+      });
+      if (existingRequests.length) {
+        throw new ConflictError(
+          `${existingRequests.length} lịch trong ngày đã có yêu cầu đổi/hủy đang chờ; chưa tạo yêu cầu nào`
+        );
+      }
+
+      const activeCskh = await transaction.users.findMany({
+        where: {
+          status: 'active',
+          roles: { is: { code: 'cskh' } },
+        },
+        select: { id: true },
+      });
+      if (!activeCskh.length) {
+        throw new AppError('Hiện không có nhân viên CSKH khả dụng để tiếp nhận yêu cầu', 503);
+      }
+      const activeCskhIds = new Set(activeCskh.map(({ id }) => id));
+
+      const requestReason = `Bác sĩ xin nghỉ ngày ${data.date}: ${data.reason.trim()}`;
+      const requests = appointments.map((appointment) => ({
+        appointment_id: appointment.id,
+        patient_id: appointment.patient_id,
+        action: 'reschedule' as const,
+        reason: requestReason,
+        initiated_by_role: 'doctor' as const,
+        initiated_by_user_id: doctorId,
+        status: 'pending' as const,
+      }));
+
+      const notifications = appointments.flatMap((appointment) => {
+        const assignedRecipients = [
+          appointment.patients.assigned_cskh_id,
+          ...appointment.patients.cskh_assignments.map(({ cskh_staff_id }) => cskh_staff_id),
+        ].filter((id): id is string => Boolean(id && activeCskhIds.has(id)));
+        const recipientIds = assignedRecipients.length
+          ? [...new Set(assignedRecipients)]
+          : activeCskh.map(({ id }) => id);
+
+        return recipientIds.map((userId) => ({
+          user_id: userId,
+          type: 'system' as const,
+          title: `Bác sĩ xin nghỉ ngày ${data.date}`,
+          content: `Bác sĩ phụ trách xin nghỉ ngày ${data.date}; cần đổi lịch khám cho bệnh nhân (lịch #${appointment.id}). Lý do: ${data.reason.trim()}`,
+          related_table: 'appointments',
+          related_id: appointment.id,
+          status: 'pending' as const,
+        }));
+      });
+
+      await transaction.appointment_change_requests.createMany({ data: requests });
+      await transaction.notifications.createMany({ data: notifications });
+
+      return {
+        date: data.date,
+        appointmentCount: appointments.length,
+        requestCount: requests.length,
+      };
+    });
+  }
+
   static async getAppointmentChangeRequests(params: {
     page?: string;
     limit?: string;
@@ -745,6 +870,11 @@ export class AppointmentService {
       let replacementDoctor: { id: string; full_name: string } | null = null;
       if (decision === 'approved') {
         const appointment = request.appointments;
+        await this.lockAppointmentSchedule(
+          transaction,
+          request.patient_id,
+          appointment.assigned_staff_id || undefined
+        );
         if (!['pending', 'confirmed'].includes(appointment.status)) {
           throw new BadRequestError('Lịch hẹn không còn ở trạng thái có thể thay đổi');
         }
@@ -764,6 +894,12 @@ export class AppointmentService {
             }
             assertAppointmentDuringBusinessHours(requestedScheduledAt);
 
+            await this.ensurePatientSlotAvailable(
+              transaction,
+              request.patient_id,
+              appointment.id,
+              requestedScheduledAt
+            );
             await this.ensureDoctorSlotAvailable(
               transaction,
               appointment.id,
@@ -825,6 +961,12 @@ export class AppointmentService {
           }
           assertAppointmentDuringBusinessHours(requestedScheduledAt);
 
+          await this.ensurePatientSlotAvailable(
+            transaction,
+            request.patient_id,
+            appointment.id,
+            requestedScheduledAt
+          );
           await this.ensureDoctorSlotAvailable(
             transaction,
             appointment.id,
@@ -918,27 +1060,72 @@ export class AppointmentService {
     return serializeBigInt(reviewedRequest);
   }
 
+  private static async lockAppointmentSchedule(
+    transaction: Prisma.TransactionClient,
+    patientId: string,
+    doctorId?: string
+  ) {
+    const lockKeys = [
+      `patient:${patientId}`,
+      ...(doctorId ? [`doctor:${doctorId}`] : []),
+    ].sort();
+
+    for (const lockKey of lockKeys) {
+      await transaction.$queryRaw`
+        SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text
+      `;
+    }
+  }
+
+  private static async ensurePatientSlotAvailable(
+    transaction: Prisma.TransactionClient,
+    patientId: string,
+    appointmentId: string | null,
+    scheduledAt: Date
+  ) {
+    const durationMs = APPOINTMENT_DURATION_MINUTES * 60 * 1000;
+    const conflict = await transaction.appointments.findFirst({
+      where: {
+        patient_id: patientId,
+        ...(appointmentId ? { id: { not: appointmentId } } : {}),
+        status: { in: ['pending', 'confirmed', 'checked_in', 'in_progress'] },
+        scheduled_at: {
+          gt: new Date(scheduledAt.getTime() - durationMs),
+          lt: new Date(scheduledAt.getTime() + durationMs),
+        },
+      },
+      select: { id: true },
+    });
+    if (conflict) {
+      throw new ConflictError(
+        'Bệnh nhân đã có lịch khám khác trong khung 45 phút này; mỗi ca chỉ được chọn một bác sĩ'
+      );
+    }
+  }
+
   private static async ensureDoctorSlotAvailable(
     transaction: Prisma.TransactionClient,
-    appointmentId: string,
+    appointmentId: string | null,
     doctorId: string | null,
     scheduledAt: Date
   ) {
     if (!doctorId) return;
 
-    const slotStart = new Date(scheduledAt.getTime() - 29 * 60 * 1000);
-    const slotEnd = new Date(scheduledAt.getTime() + 29 * 60 * 1000);
+    const durationMs = APPOINTMENT_DURATION_MINUTES * 60 * 1000;
     const conflict = await transaction.appointments.findFirst({
       where: {
-        id: { not: appointmentId },
+        ...(appointmentId ? { id: { not: appointmentId } } : {}),
         assigned_staff_id: doctorId,
         status: { in: ['pending', 'confirmed', 'checked_in', 'in_progress'] },
-        scheduled_at: { gte: slotStart, lte: slotEnd },
+        scheduled_at: {
+          gt: new Date(scheduledAt.getTime() - durationMs),
+          lt: new Date(scheduledAt.getTime() + durationMs),
+        },
       },
       select: { id: true },
     });
     if (conflict) {
-      throw new ConflictError('Bác sĩ đã có lịch trong khung giờ được yêu cầu');
+      throw new ConflictError('Bác sĩ đã có lịch khám trùng khung 45 phút được yêu cầu');
     }
   }
 

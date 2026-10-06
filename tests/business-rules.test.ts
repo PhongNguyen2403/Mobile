@@ -1,4 +1,8 @@
 import assert from 'assert';
+import {
+  APPOINTMENT_DURATION_MINUTES,
+  assertAppointmentDuringBusinessHours,
+} from '../src/utils/appointment-hours.util';
 
 /**
  * Test Suite: Business Logic Verification
@@ -52,6 +56,16 @@ function shouldCreateFollowUp(nextVisitDate?: string | null): boolean {
 
 async function runTests() {
   console.log('--- BẮT ĐẦU KIỂM THỬ CÁC QUY TẮC NGHIỆP VỤ (BUSINESS RULES) ---');
+
+  console.log('Kiểm thử 0: Thời lượng ca khám 45 phút...');
+  assert.strictEqual(APPOINTMENT_DURATION_MINUTES, 45);
+  assert.doesNotThrow(() =>
+    assertAppointmentDuringBusinessHours(new Date('2026-10-07T13:15:00.000Z'))
+  );
+  assert.throws(() =>
+    assertAppointmentDuringBusinessHours(new Date('2026-10-07T13:16:00.000Z'))
+  );
+  console.log('✔ Kiểm thử 0 THÀNH CÔNG: Ca 45 phút kết thúc muộn nhất lúc 21:00.');
 
   // Test 1: Appointment State Machine
   console.log('Kiểm thử 1: Luồng chuyển trạng thái Appointment...');

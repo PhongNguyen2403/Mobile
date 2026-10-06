@@ -3,7 +3,7 @@ import { BadRequestError } from '../middlewares/error.middleware';
 export const APPOINTMENT_TIME_ZONE = 'Asia/Ho_Chi_Minh';
 export const APPOINTMENT_OPEN_MINUTES = 7 * 60;
 export const APPOINTMENT_CLOSE_MINUTES = 21 * 60;
-export const APPOINTMENT_DURATION_MINUTES = 30;
+export const APPOINTMENT_DURATION_MINUTES = 45;
 
 export const assertAppointmentInFuture = (date: Date, now = new Date()) => {
   if (date <= now) {
@@ -28,7 +28,7 @@ export const assertAppointmentDuringBusinessHours = (date: Date) => {
     startMinutes + APPOINTMENT_DURATION_MINUTES > APPOINTMENT_CLOSE_MINUTES
   ) {
     throw new BadRequestError(
-      'Giờ bắt đầu khám phải trong khoảng 07:00–20:30 (giờ Việt Nam) để buổi khám kết thúc trước 21:00'
+      'Giờ bắt đầu khám phải trong khoảng 07:00–20:15 (giờ Việt Nam) để ca 45 phút kết thúc trước 21:00'
     );
   }
 };

@@ -8,6 +8,7 @@ import {
   appointmentIdParamSchema,
   requestAppointmentChangeSchema,
   requestDoctorAppointmentChangeSchema,
+  requestDoctorDayOffSchema,
   listAppointmentChangeRequestsSchema,
   reviewAppointmentChangeRequestSchema,
   notifyChangeRequestPatientSchema,
@@ -60,6 +61,13 @@ router.patch(
   roleGuard('patient'),
   validate(submitChangeRequestPatientChoiceSchema),
   AppointmentController.submitChangeRequestPatientChoice
+);
+
+router.post(
+  '/doctor-day-off-request',
+  roleGuard('doctor'),
+  validate(requestDoctorDayOffSchema),
+  AppointmentController.requestDoctorDayOff
 );
 
 // Route tra cứu lịch trống an toàn của bác sĩ (đặt TRƯỚC /:id)
